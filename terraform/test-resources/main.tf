@@ -6,13 +6,15 @@ terraform {
 }
 
 provider "aws" {
-  region = var.source_region
-  alias  = "source"
+  region  = var.source_region
+  profile = "source-account"
+  alias   = "source"
 }
 
 provider "aws" {
-  region = var.target_region
-  alias  = "target"
+  region  = var.target_region
+  profile = "target-account"
+  alias   = "target"
 }
 
 data "aws_caller_identity" "source" { provider = aws.source }

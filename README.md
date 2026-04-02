@@ -29,12 +29,37 @@ Source Account (ap-southeast-1)          Target Account (ap-southeast-7)
 
 - Terraform >= 1.5
 - Python >= 3.9
-- AWS CLI configured with named profiles for source and target accounts
-- ACM certificates (if needed for encrypted resources)
+- AWS CLI v2
+- Two AWS accounts (source and target)
 
 ## Quick Start
 
-### 1. Deploy Test Infrastructure
+### 1. Configure AWS Profiles
+
+Set up named profiles for each account:
+
+```bash
+# Source account (Singapore)
+aws configure --profile source-account
+# → AWS Access Key ID:     <SOURCE_ACCOUNT_KEY>
+# → AWS Secret Access Key: <SOURCE_ACCOUNT_SECRET>
+# → Default region:        ap-southeast-1
+
+# Target account (Thailand)
+aws configure --profile target-account
+# → AWS Access Key ID:     <TARGET_ACCOUNT_KEY>
+# → AWS Secret Access Key: <TARGET_ACCOUNT_SECRET>
+# → Default region:        ap-southeast-7
+```
+
+Verify both profiles:
+
+```bash
+aws sts get-caller-identity --profile source-account
+aws sts get-caller-identity --profile target-account
+```
+
+### 2. Deploy Test Infrastructure
 
 Terraform provisions all source and target resources (VPC, EC2, S3, RDS, KMS, IAM) and auto-generates the migration config.
 
@@ -46,7 +71,7 @@ terraform apply \
   -var="db_password=<YOUR_DB_PASSWORD>"
 ```
 
-### 2. Generate Config
+### 3. Generate Config
 
 ```bash
 # From project root
@@ -55,13 +80,13 @@ make gen-config
 
 This populates `scripts/config.yaml` with real resource IDs, bucket names, and KMS ARNs from Terraform outputs — no manual editing needed.
 
-### 3. Install Python dependencies
+### 4. Install Python dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 4. Run migrations
+### 5. Run migrations
 
 ```bash
 # Dry run first

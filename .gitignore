@@ -6,3 +6,4 @@ __pycache__/
 validation/
 *.env
 .DS_Store
+scripts/config.yaml

@@ -62,4 +62,4 @@ cat scripts/config.yaml
 echo ""
 echo "─────────────────────────────────────────"
 echo "RDS connection URL (fill in your password):"
-echo "  postgres://admin:<PASSWORD>@${SRC_RDS_EP}/migrationtest"
+echo "  postgres://dbadmin:<PASSWORD>@${SRC_RDS_EP}/migrationtest"

@@ -66,8 +66,10 @@ aws sts get-caller-identity --profile target-account
 CloudFormation deploys two stacks — one per account/region:
 
 ```bash
-make infra TARGET_ACCOUNT_ID=<YOUR_TARGET_ACCOUNT_ID> DB_PASSWORD=<YOUR_DB_PASSWORD>
+make infra TARGET_ACCOUNT_ID=<YOUR_TARGET_ACCOUNT_ID> DB_PASSWORD=<CHOOSE_A_PASSWORD>
 ```
+
+`DB_PASSWORD` is the master password for the new test RDS instance — pick any value you like. You'll need it later for the `seed-rds` step.
 
 This creates:
 - **Source stack** (ap-southeast-1): VPC, EC2, S3 (SSE-KMS), RDS, KMS, IAM
@@ -147,7 +149,7 @@ usage: migrate_rds.py [-c CONFIG] [-d DB_INSTANCE_ID] [--instance-class CLASS] [
 | Tool | Steps | Duration |
 |------|-------|----------|
 | `migrate_ec2.py` | Create AMI → Share → Copy cross-region (re-encrypt) → Print launch command | 10-30 min |
-| `migrate_s3.py` | Create target bucket → Sync objects with SSE-KMS | Depends on data size |
+| `migrate_s3.py` | Sync objects with SSE-KMS re-encryption | Depends on data size |
 | `migrate_rds.py` | Create snapshot → Share → Copy cross-region (re-encrypt) → Restore | 30-90 min |
 
 ## Validation (Pre/Post Check)
@@ -189,7 +191,7 @@ python3 scripts/seed.py seed-ec2 -c scripts/config.yaml -i i-0abc123
 
 # 1b. Seed RDS: insert validation record
 python3 scripts/seed.py seed-rds \
-  --db-url "postgres://admin:pass@mydb.xxx.ap-southeast-1.rds.amazonaws.com:5432/mydb"
+  --db-url "postgres://dbadmin:<PASSWORD>@<RDS_ENDPOINT>/migrationtest"
 #  → Token: 6ba7b810-9dad-11d1-80b4-00c04fd430c8
 
 # 1c. Fingerprint all source resources
@@ -209,7 +211,7 @@ python3 scripts/seed.py verify-ec2 -c scripts/config.yaml --target \
 
 # 3b. Verify RDS: check validation record on target DB
 python3 scripts/seed.py verify-rds \
-  --db-url "postgres://admin:pass@target.xxx.ap-southeast-7.rds.amazonaws.com:5432/mydb" \
+  --db-url "postgres://dbadmin:<PASSWORD>@<TARGET_RDS_ENDPOINT>/migrationtest" \
   --token 6ba7b810-9dad-11d1-80b4-00c04fd430c8
 
 # 3c. Fingerprint target resources + compare

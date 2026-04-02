@@ -234,7 +234,7 @@ Resources:
       StorageEncrypted: true
       KmsKeyId: !GetAtt KMSKey.Arn
       DBName: migrationtest
-      MasterUsername: admin
+      MasterUsername: dbadmin
       MasterUserPassword: !Ref DBPassword
       DBSubnetGroupName: !Ref DBSubnetGroup
       VPCSecurityGroups: [!Ref SecurityGroup]

@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+.terraform/
+*.tfstate*
+.terraform.lock.hcl
+validation/
+*.env

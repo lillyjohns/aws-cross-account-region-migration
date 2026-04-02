@@ -34,25 +34,26 @@ Source Account (ap-southeast-1)          Target Account (ap-southeast-7)
 
 ## Quick Start
 
-### 1. Configure
+### 1. Deploy Test Infrastructure
 
-Edit `scripts/config.yaml` with your account IDs, profiles, and resource IDs.
-
-### 2. Deploy IAM & KMS (Terraform)
+Terraform provisions all source and target resources (VPC, EC2, S3, RDS, KMS, IAM) and auto-generates the migration config.
 
 ```bash
-# Source account prerequisites
-cd terraform/source-account
+cd terraform/test-resources
 terraform init
-terraform apply -var="target_account_id=222222222222"
-
-# Target account prerequisites
-cd ../target-account
-terraform init
-terraform apply -var="source_account_id=111111111111"
+terraform apply \
+  -var="target_account_id=<YOUR_TARGET_ACCOUNT_ID>" \
+  -var="db_password=<YOUR_DB_PASSWORD>"
 ```
 
-Copy the `kms_key_arn` output from target account into `config.yaml` → `target_kms_key_arn`.
+### 2. Generate Config
+
+```bash
+# From project root
+make gen-config
+```
+
+This populates `scripts/config.yaml` with real resource IDs, bucket names, and KMS ARNs from Terraform outputs — no manual editing needed.
 
 ### 3. Install Python dependencies
 

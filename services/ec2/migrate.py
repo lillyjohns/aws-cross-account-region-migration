@@ -22,6 +22,14 @@ def migrate_instance(cfg, instance_id, dry_run=False):
     if dry_run:
         print(f"  DRY RUN: would create AMI '{ami_name}', copy to {tgt['region']}, and launch")
         return
+    # Flush disk before snapshot (NoReboot mode)
+    ssm = boto3.Session(profile_name=src["profile"], region_name=src["region"]).client("ssm")
+    try:
+        ssm.send_command(InstanceIds=[instance_id], DocumentName="AWS-RunShellScript",
+                         Parameters={"commands": ["sync"]}, Comment="pre-snapshot-sync")
+        time.sleep(5)
+    except Exception:
+        pass  # Best effort — continue even if SSM fails
     resp = src_ec2.create_image(InstanceId=instance_id, Name=ami_name, NoReboot=True)
     ami_id = resp["ImageId"]
     print(f"  ✅ AMI: {ami_id}")

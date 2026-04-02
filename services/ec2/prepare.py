@@ -35,7 +35,8 @@ def seed_ec2(session, instance_id):
 
     print(f"\n🌱 Seeding EC2 marker on {instance_id}...")
     result = _ssm_run(ssm, instance_id, [
-        f"cat > {MARKER_PATH} << 'MARKER_EOF'\n{marker}\nMARKER_EOF",
+        f"echo '{marker}' > {MARKER_PATH}",
+        "sync",
         f"cat {MARKER_PATH}",
     ], label="seed")
 

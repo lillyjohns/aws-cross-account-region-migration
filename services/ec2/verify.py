@@ -31,9 +31,11 @@ def verify_marker(session, instance_id, expected_token):
         return False
 
     try:
-        marker = json.loads(result["StandardOutputContent"].strip())
+        raw = result["StandardOutputContent"].strip()
+        marker = json.loads(raw)
     except json.JSONDecodeError:
         print(f"  ❌ Marker file exists but content is invalid")
+        print(f"  Raw output: {result['StandardOutputContent'][:500]}")
         return False
 
     expected_checksum = hashlib.sha256(expected_token.encode()).hexdigest()

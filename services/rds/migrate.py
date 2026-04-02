@@ -44,6 +44,8 @@ def migrate_rds(cfg, db_id, target_instance_class, target_subnet_group, dry_run=
                       "DBInstanceClass": target_instance_class, "MultiAZ": False, "PubliclyAccessible": False}
     if target_subnet_group:
         restore_params["DBSubnetGroupName"] = target_subnet_group
+    if cfg.get("target_security_group_id"):
+        restore_params["VpcSecurityGroupIds"] = [cfg["target_security_group_id"]]
     tgt_rds.restore_db_instance_from_db_snapshot(**restore_params)
     wait_for(lambda: tgt_rds.describe_db_instances(DBInstanceIdentifier=target_db_id),
              lambda r: r["DBInstances"][0]["DBInstanceStatus"] == "available",

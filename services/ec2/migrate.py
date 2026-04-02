@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""EC2 cross-account cross-region migration via AMI share + copy."""
+"""EC2 cross-account cross-region migration via AMI share + copy + launch."""
 
 import argparse, sys, time, boto3
 from services.shared.utils import load_config, wait_for
@@ -8,15 +8,19 @@ from services.shared.utils import load_config, wait_for
 def migrate_instance(cfg, instance_id, dry_run=False):
     src, tgt = cfg["source"], cfg["target"]
     kms_key = cfg["target_kms_key_arn"]
+    subnet_id = cfg["target_subnet_id"]
+    sg_id = cfg["target_security_group_id"]
+    instance_profile = cfg["target_instance_profile_arn"]
+
     src_ec2 = boto3.Session(profile_name=src["profile"], region_name=src["region"]).client("ec2")
     tgt_ec2 = boto3.Session(profile_name=tgt["profile"], region_name=tgt["region"]).client("ec2")
 
     ts = time.strftime("%Y%m%d-%H%M%S")
     ami_name = f"migration-{instance_id}-{ts}"
 
-    print(f"\n[1/4] Creating AMI from {instance_id}...")
+    print(f"\n[1/5] Creating AMI from {instance_id}...")
     if dry_run:
-        print(f"  DRY RUN: would create AMI '{ami_name}'")
+        print(f"  DRY RUN: would create AMI '{ami_name}', copy to {tgt['region']}, and launch")
         return
     resp = src_ec2.create_image(InstanceId=instance_id, Name=ami_name, NoReboot=True)
     ami_id = resp["ImageId"]
@@ -24,7 +28,7 @@ def migrate_instance(cfg, instance_id, dry_run=False):
     wait_for(lambda: src_ec2.describe_images(ImageIds=[ami_id]),
              lambda r: r["Images"][0]["State"] == "available", f"AMI {ami_id} available")
 
-    print(f"\n[2/4] Sharing AMI with account {tgt['account_id']}...")
+    print(f"\n[2/5] Sharing AMI with account {tgt['account_id']}...")
     src_ec2.modify_image_attribute(ImageId=ami_id, LaunchPermission={"Add": [{"UserId": tgt["account_id"]}]})
     for bdm in src_ec2.describe_images(ImageIds=[ami_id])["Images"][0].get("BlockDeviceMappings", []):
         snap_id = bdm.get("Ebs", {}).get("SnapshotId")
@@ -33,7 +37,7 @@ def migrate_instance(cfg, instance_id, dry_run=False):
                                               OperationType="add", UserIds=[tgt["account_id"]])
             print(f"  ✅ Shared snapshot {snap_id}")
 
-    print(f"\n[3/4] Copying AMI to {tgt['region']}...")
+    print(f"\n[3/5] Copying AMI to {tgt['region']}...")
     copy_resp = tgt_ec2.copy_image(Name=ami_name, SourceImageId=ami_id, SourceRegion=src["region"],
                                     Encrypted=True, KmsKeyId=kms_key)
     target_ami = copy_resp["ImageId"]
@@ -44,13 +48,24 @@ def migrate_instance(cfg, instance_id, dry_run=False):
     src_inst = src_ec2.describe_instances(InstanceIds=[instance_id])["Reservations"][0]["Instances"][0]
     inst_type = src_inst["InstanceType"]
 
-    print(f"\n[4/4] ✅ Migration complete!")
-    print(f"  Target AMI: {target_ami} in {tgt['region']}")
-    print(f"  Launch with:")
-    print(f"    aws ec2 run-instances --image-id {target_ami} --instance-type {inst_type} \\")
-    print(f"      --subnet-id <TARGET_SUBNET> --security-group-ids <TARGET_SG> \\")
-    print(f"      --region {tgt['region']} --profile {tgt['profile']}")
-    return target_ami
+    print(f"\n[4/5] Launching instance in {tgt['region']}...")
+    run_resp = tgt_ec2.run_instances(
+        ImageId=target_ami, InstanceType=inst_type, MinCount=1, MaxCount=1,
+        SubnetId=subnet_id, SecurityGroupIds=[sg_id],
+        IamInstanceProfile={"Arn": instance_profile},
+        TagSpecifications=[{"ResourceType": "instance",
+                            "Tags": [{"Key": "Name", "Value": f"migrated-{instance_id}"}]}],
+    )
+    target_instance_id = run_resp["Instances"][0]["InstanceId"]
+    print(f"  ✅ Instance: {target_instance_id}")
+    wait_for(lambda: tgt_ec2.describe_instances(InstanceIds=[target_instance_id]),
+             lambda r: r["Reservations"][0]["Instances"][0]["State"]["Name"] == "running",
+             f"Instance {target_instance_id} running")
+
+    print(f"\n[5/5] ✅ Migration complete!")
+    print(f"  Target instance: {target_instance_id} in {tgt['region']}")
+    print(f"  Target AMI: {target_ami}")
+    return target_instance_id
 
 
 def main():

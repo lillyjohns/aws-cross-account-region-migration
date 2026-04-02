@@ -23,6 +23,10 @@ SRC_INSTANCE=$(get_output source $SOURCE_PROFILE $SOURCE_REGION SourceInstanceId
 SRC_S3=$(get_output source $SOURCE_PROFILE $SOURCE_REGION SourceS3Bucket)
 TGT_S3=$(get_output target $TARGET_PROFILE $TARGET_REGION TargetS3Bucket)
 TGT_KMS=$(get_output target $TARGET_PROFILE $TARGET_REGION TargetKMSKeyArn)
+TGT_SUBNET=$(get_output target $TARGET_PROFILE $TARGET_REGION TargetSubnetId)
+TGT_SG=$(get_output target $TARGET_PROFILE $TARGET_REGION TargetSecurityGroupId)
+TGT_INSTANCE_PROFILE=$(get_output target $TARGET_PROFILE $TARGET_REGION TargetInstanceProfileArn)
+TGT_DB_SUBNET_GROUP=$(get_output target $TARGET_PROFILE $TARGET_REGION TargetDBSubnetGroup)
 SRC_RDS_ID=$(get_output source $SOURCE_PROFILE $SOURCE_REGION SourceRDSIdentifier)
 SRC_RDS_EP=$(get_output source $SOURCE_PROFILE $SOURCE_REGION SourceRDSEndpoint)
 
@@ -39,6 +43,10 @@ target:
   profile: "${TARGET_PROFILE}"
 
 target_kms_key_arn: "${TGT_KMS}"
+target_subnet_id: "${TGT_SUBNET}"
+target_security_group_id: "${TGT_SG}"
+target_instance_profile_arn: "${TGT_INSTANCE_PROFILE}"
+target_db_subnet_group: "${TGT_DB_SUBNET_GROUP}"
 
 ec2:
   instance_ids:
@@ -53,7 +61,7 @@ rds:
   instances:
     - db_instance_id: "${SRC_RDS_ID}"
       target_instance_class: "db.t3.micro"
-      target_subnet_group: ""
+      target_subnet_group: "${TGT_DB_SUBNET_GROUP}"
 EOF
 
 echo "✅ scripts/config.yaml updated"

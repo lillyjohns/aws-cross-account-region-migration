@@ -36,27 +36,25 @@ Source Account (ap-southeast-1)          Target Account (ap-southeast-7)
 
 ### 1. Configure AWS Profiles
 
-Create an IAM role (e.g., `MigrationAdmin`) with `AdministratorAccess` in both the source and target accounts. Each role's trust policy should allow your base account/user to assume it.
+Log into each AWS account's console, click your username (top right) → **Command line or programmatic access**, and copy the credentials into named profiles:
 
-Then configure assume-role profiles in `~/.aws/config`:
+```bash
+# Source account (Singapore)
+aws configure set region ap-southeast-1 --profile source-account
+aws configure set aws_access_key_id <PASTE> --profile source-account
+aws configure set aws_secret_access_key <PASTE> --profile source-account
+aws configure set aws_session_token <PASTE> --profile source-account
 
-```ini
-# ~/.aws/config
-
-[profile source-account]
-role_arn = arn:aws:iam::<SOURCE_ACCOUNT_ID>:role/MigrationAdmin
-source_profile = default
-region = ap-southeast-1
-
-[profile target-account]
-role_arn = arn:aws:iam::<TARGET_ACCOUNT_ID>:role/MigrationAdmin
-source_profile = default
-region = ap-southeast-7
+# Target account (Thailand)
+aws configure set region ap-southeast-7 --profile target-account
+aws configure set aws_access_key_id <PASTE> --profile target-account
+aws configure set aws_secret_access_key <PASTE> --profile target-account
+aws configure set aws_session_token <PASTE> --profile target-account
 ```
 
-> `source_profile` points to a profile in `~/.aws/credentials` that has permission to call `sts:AssumeRole` on both roles. AWS CLI/SDK/Terraform handle token refresh automatically.
+> ⚠️ Temporary credentials expire (typically 1–12 hours). Re-run the above if your session expires.
 
-Verify both profiles:
+Verify:
 
 ```bash
 aws sts get-caller-identity --profile source-account

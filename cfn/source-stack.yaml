@@ -1,0 +1,259 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Cross-account migration POC — source resources (ap-southeast-1)"
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: cross-account-migration
+  TargetAccountId:
+    Type: String
+    Description: Target AWS account ID for cross-account sharing
+  DBPassword:
+    Type: String
+    NoEcho: true
+    Description: RDS master password
+  DBEngine:
+    Type: String
+    Default: postgres
+    AllowedValues: [postgres, mysql]
+  LatestAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/ami-amazon-linux-latest/al2023-ami-kernel-default-x86_64
+
+Conditions:
+  IsPostgres: !Equals [!Ref DBEngine, postgres]
+
+Resources:
+  # ── VPC ──────────────────────────────────────────────────
+  VPC:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.0.0.0/16
+      EnableDnsSupport: true
+      EnableDnsHostnames: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-source-vpc
+
+  SubnetA:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.0.0/24
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-source-subnet-0
+
+  SubnetB:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref VPC
+      CidrBlock: 10.0.1.0/24
+      AvailabilityZone: !Select [1, !GetAZs ""]
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-source-subnet-1
+
+  IGW:
+    Type: AWS::EC2::InternetGateway
+    Properties:
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-source-igw
+
+  IGWAttachment:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties:
+      VpcId: !Ref VPC
+      InternetGatewayId: !Ref IGW
+
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties:
+      VpcId: !Ref VPC
+
+  DefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: IGWAttachment
+    Properties:
+      RouteTableId: !Ref RouteTable
+      DestinationCidrBlock: 0.0.0.0/0
+      GatewayId: !Ref IGW
+
+  SubnetARouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SubnetA
+      RouteTableId: !Ref RouteTable
+
+  SubnetBRouteAssoc:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties:
+      SubnetId: !Ref SubnetB
+      RouteTableId: !Ref RouteTable
+
+  SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Migration POC security group
+      VpcId: !Ref VPC
+      SecurityGroupEgress:
+        - IpProtocol: "-1"
+          CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-source-sg
+
+  SGSelfIngress5432:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref SecurityGroup
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
+      SourceSecurityGroupId: !Ref SecurityGroup
+
+  SGSelfIngress3306:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !Ref SecurityGroup
+      IpProtocol: tcp
+      FromPort: 3306
+      ToPort: 3306
+      SourceSecurityGroupId: !Ref SecurityGroup
+
+  # ── KMS ──────────────────────────────────────────────────
+  KMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub ${ProjectName} - shared with target
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: SourceAdmin
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: kms:*
+            Resource: "*"
+          - Sid: TargetDecrypt
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${TargetAccountId}:root
+            Action:
+              - kms:Decrypt
+              - kms:DescribeKey
+              - kms:CreateGrant
+              - kms:ReEncryptFrom
+            Resource: "*"
+
+  # ── IAM ──────────────────────────────────────────────────
+  EC2SSMRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${ProjectName}-ec2-ssm
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      InstanceProfileName: !Sub ${ProjectName}-ec2-ssm
+      Roles: [!Ref EC2SSMRole]
+
+  # ── EC2 ──────────────────────────────────────────────────
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: !Ref LatestAmiId
+      InstanceType: t3.micro
+      SubnetId: !Ref SubnetA
+      SecurityGroupIds: [!Ref SecurityGroup]
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 10
+            VolumeType: gp3
+            Encrypted: true
+            KmsKeyId: !GetAtt KMSKey.Arn
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          echo "Migration test instance - $(date)" > /home/ec2-user/README.txt
+          echo '{"created":"source","region":"${AWS::Region}"}' > /home/ec2-user/instance-info.json
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-source-ec2
+
+  # ── S3 ───────────────────────────────────────────────────
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Sub ${ProjectName}-src-${AWS::AccountId}
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !GetAtt KMSKey.Arn
+            BucketKeyEnabled: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-source-s3
+
+  # ── RDS ──────────────────────────────────────────────────
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupName: !Sub ${ProjectName}-source
+      DBSubnetGroupDescription: Source DB subnet group
+      SubnetIds: [!Ref SubnetA, !Ref SubnetB]
+
+  RDSInstance:
+    Type: AWS::RDS::DBInstance
+    DeletionPolicy: Delete
+    Properties:
+      DBInstanceIdentifier: !Sub ${ProjectName}-source-db
+      Engine: !Ref DBEngine
+      EngineVersion: !If [IsPostgres, "16.4", "8.0.39"]
+      DBInstanceClass: db.t3.micro
+      AllocatedStorage: 20
+      StorageType: gp3
+      StorageEncrypted: true
+      KmsKeyId: !GetAtt KMSKey.Arn
+      DBName: migrationtest
+      MasterUsername: admin
+      MasterUserPassword: !Ref DBPassword
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      VPCSecurityGroups: [!Ref SecurityGroup]
+      BackupRetentionPeriod: 1
+      PubliclyAccessible: false
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-source-rds
+
+Outputs:
+  SourceInstanceId:
+    Value: !Ref EC2Instance
+  SourceS3Bucket:
+    Value: !Ref S3Bucket
+  SourceRDSEndpoint:
+    Value: !GetAtt RDSInstance.Endpoint.Address
+  SourceRDSIdentifier:
+    Value: !Ref RDSInstance
+  SourceKMSKeyArn:
+    Value: !GetAtt KMSKey.Arn
+  SourceAccountId:
+    Value: !Ref AWS::AccountId

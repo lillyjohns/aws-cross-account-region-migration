@@ -1,0 +1,51 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "Cross-account migration POC — target resources (ap-southeast-7)"
+
+Parameters:
+  ProjectName:
+    Type: String
+    Default: cross-account-migration
+  SourceAccountId:
+    Type: String
+    Description: Source AWS account ID
+
+Resources:
+  # ── KMS ──────────────────────────────────────────────────
+  KMSKey:
+    Type: AWS::KMS::Key
+    Properties:
+      Description: !Sub ${ProjectName} - target re-encryption
+      EnableKeyRotation: true
+      KeyPolicy:
+        Version: "2012-10-17"
+        Statement:
+          - Sid: TargetAdmin
+            Effect: Allow
+            Principal:
+              AWS: !Sub arn:aws:iam::${AWS::AccountId}:root
+            Action: kms:*
+            Resource: "*"
+
+  # ── S3 ───────────────────────────────────────────────────
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    DeletionPolicy: Delete
+    Properties:
+      BucketName: !Sub ${ProjectName}-tgt-${AWS::AccountId}
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: aws:kms
+              KMSMasterKeyID: !GetAtt KMSKey.Arn
+            BucketKeyEnabled: true
+      Tags:
+        - Key: Name
+          Value: !Sub ${ProjectName}-target-s3
+
+Outputs:
+  TargetKMSKeyArn:
+    Value: !GetAtt KMSKey.Arn
+  TargetS3Bucket:
+    Value: !Ref S3Bucket
+  TargetAccountId:
+    Value: !Ref AWS::AccountId

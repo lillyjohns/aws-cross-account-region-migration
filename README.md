@@ -28,7 +28,6 @@ Source Account (ap-southeast-1)          Target Account (ap-southeast-7)
 
 ## Prerequisites
 
-- Terraform >= 1.5
 - Python >= 3.9
 - AWS CLI v2
 - Two AWS accounts (source and target)
@@ -64,24 +63,25 @@ aws sts get-caller-identity --profile target-account
 
 ### 2. Deploy Test Infrastructure
 
-Terraform provisions all source and target resources (VPC, EC2, S3, RDS, KMS, IAM) and auto-generates the migration config.
+CloudFormation deploys two stacks — one per account/region:
 
 ```bash
-cd terraform/test-resources
-terraform init
-terraform apply \
-  -var="target_account_id=<YOUR_TARGET_ACCOUNT_ID>" \
-  -var="db_password=<YOUR_DB_PASSWORD>"
+make infra TARGET_ACCOUNT_ID=<YOUR_TARGET_ACCOUNT_ID> DB_PASSWORD=<YOUR_DB_PASSWORD>
 ```
+
+This creates:
+- **Source stack** (ap-southeast-1): VPC, EC2, S3 (SSE-KMS), RDS, KMS, IAM
+- **Target stack** (ap-southeast-7): S3 (SSE-KMS), KMS
+
+⏱ Takes ~10–15 min (mostly RDS).
 
 ### 3. Generate Config
 
 ```bash
-# From project root
 make gen-config
 ```
 
-This populates `scripts/config.yaml` with real resource IDs, bucket names, and KMS ARNs from Terraform outputs — no manual editing needed.
+This populates `scripts/config.yaml` with real resource IDs, bucket names, and KMS ARNs from CloudFormation stack outputs — no manual editing needed.
 
 ### 4. Install Python dependencies
 

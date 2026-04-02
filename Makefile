@@ -32,6 +32,17 @@ gen-config:
 	bash scripts/gen-config.sh
 
 # ── EC2 ───────────────────────────────────────────────────
+# ── Seed test data ────────────────────────────────────────
+seed-s3:
+	@echo "Uploading sample objects to source bucket..."
+	@SRC_BUCKET=$$(aws cloudformation describe-stacks --stack-name $(STACK_NAME)-source --profile source-account --region $(SOURCE_REGION) --query "Stacks[0].Outputs[?OutputKey=='SourceS3Bucket'].OutputValue" --output text) && \
+	echo '{"id":1,"name":"Alice","value":42}' | aws s3 cp - s3://$$SRC_BUCKET/data/sample1.json --profile source-account --region $(SOURCE_REGION) && \
+	echo '{"id":2,"name":"Bob","value":99}' | aws s3 cp - s3://$$SRC_BUCKET/data/sample2.json --profile source-account --region $(SOURCE_REGION) && \
+	echo '{"id":3,"name":"Charlie","value":7}' | aws s3 cp - s3://$$SRC_BUCKET/data/sample3.json --profile source-account --region $(SOURCE_REGION) && \
+	echo 'Migration test data - do not delete' | aws s3 cp - s3://$$SRC_BUCKET/docs/readme.txt --profile source-account --region $(SOURCE_REGION) && \
+	echo '2026-04-01 INFO Migration test log entry' | aws s3 cp - s3://$$SRC_BUCKET/logs/test.log --profile source-account --region $(SOURCE_REGION) && \
+	echo "✅ 5 sample objects uploaded to $$SRC_BUCKET"
+
 ec2-prepare:
 	python3 -m services.ec2.prepare -c scripts/config.yaml
 

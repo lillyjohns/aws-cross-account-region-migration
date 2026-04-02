@@ -126,7 +126,11 @@ Seed a marker file on the source instance via SSM and capture a fingerprint:
 
 ```bash
 make ec2-prepare
-# or with a specific instance:
+```
+
+To target a specific instance:
+
+```bash
 python3 -m services.ec2.prepare -c scripts/config.yaml -i <INSTANCE_ID>
 ```
 
@@ -138,9 +142,16 @@ Save the token printed — you'll need it for verification.
 
 Creates AMI → shares with target account → copies to target region (re-encrypted with target KMS key).
 
+Dry run:
+
 ```bash
-make ec2-migrate-dry    # dry run
-make ec2-migrate        # run (⏱ 10–30 min)
+make ec2-migrate-dry
+```
+
+Run (⏱ 10–30 min):
+
+```bash
+make ec2-migrate
 ```
 
 Outputs a target AMI ID and a `run-instances` command to launch in the target region.
@@ -170,9 +181,16 @@ make s3-prepare
 
 Syncs objects from source to target bucket with SSE-KMS re-encryption.
 
+Dry run:
+
 ```bash
-make s3-migrate-dry     # dry run
-make s3-migrate         # run (⏱ depends on data size)
+make s3-migrate-dry
+```
+
+Run (⏱ depends on data size):
+
+```bash
+make s3-migrate
 ```
 
 ### Verify
@@ -201,9 +219,16 @@ Save the token printed — you'll need it for verification.
 
 Creates snapshot → shares with target account → copies to target region (re-encrypted) → restores.
 
+Dry run:
+
 ```bash
-make rds-migrate-dry    # dry run
-make rds-migrate        # run (⏱ 30–90 min)
+make rds-migrate-dry
+```
+
+Run (⏱ 30–90 min):
+
+```bash
+make rds-migrate
 ```
 
 ### Verify

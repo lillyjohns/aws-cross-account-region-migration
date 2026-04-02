@@ -1,48 +1,72 @@
 #!/usr/bin/env python3
-"""S3 cross-account cross-region migration via sync."""
+"""S3 cross-account cross-region migration via aws s3 sync."""
 
-import argparse, sys, boto3
+import argparse, json, subprocess, sys, boto3
 from services.shared.utils import load_config
 
 
-def sync_bucket(cfg, src_bucket, tgt_bucket, prefix="", dry_run=False):
-    src, tgt = cfg["source"], cfg["target"]
-    kms_key = cfg["target_kms_key_arn"]
+def grant_cross_account_read(cfg, src_bucket):
+    """Add bucket policy granting target account read access."""
+    src = cfg["source"]
+    tgt = cfg["target"]
     src_s3 = boto3.Session(profile_name=src["profile"], region_name=src["region"]).client("s3")
-    tgt_s3 = boto3.Session(profile_name=tgt["profile"], region_name=tgt["region"]).client("s3")
 
-    print(f"\n[1/2] Listing objects in s3://{src_bucket}/{prefix}...")
-    paginator = src_s3.get_paginator("list_objects_v2")
-    copied, skipped, errors = 0, 0, 0
+    policy = {
+        "Version": "2012-10-17",
+        "Statement": [{
+            "Sid": "CrossAccountMigrationRead",
+            "Effect": "Allow",
+            "Principal": {"AWS": f"arn:aws:iam::{tgt['account_id']}:root"},
+            "Action": ["s3:GetObject", "s3:ListBucket"],
+            "Resource": [f"arn:aws:s3:::{src_bucket}", f"arn:aws:s3:::{src_bucket}/*"],
+        }]
+    }
 
-    for page in paginator.paginate(Bucket=src_bucket, Prefix=prefix):
-        for obj in page.get("Contents", []):
-            key = obj["Key"]
-            try:
-                tgt_head = tgt_s3.head_object(Bucket=tgt_bucket, Key=key)
-                if tgt_head["ContentLength"] == obj["Size"]:
-                    skipped += 1
-                    continue
-            except Exception:
-                pass
+    print(f"  Granting read access to account {tgt['account_id']}...")
+    src_s3.put_bucket_policy(Bucket=src_bucket, Policy=json.dumps(policy))
+    print(f"  ✅ Bucket policy applied")
 
-            if dry_run:
-                print(f"  DRY RUN: would copy {key} ({obj['Size']} bytes)")
-                copied += 1
-                continue
 
-            try:
-                resp = src_s3.get_object(Bucket=src_bucket, Key=key)
-                tgt_s3.put_object(Bucket=tgt_bucket, Key=key, Body=resp["Body"].read(),
-                                  ServerSideEncryption="aws:kms", SSEKMSKeyId=kms_key)
-                copied += 1
-                if copied % 100 == 0:
-                    print(f"  ... {copied} objects copied")
-            except Exception as e:
-                print(f"  ❌ Failed: {key}: {e}", file=sys.stderr)
-                errors += 1
+def revoke_cross_account_read(cfg, src_bucket):
+    """Remove the cross-account bucket policy."""
+    src = cfg["source"]
+    src_s3 = boto3.Session(profile_name=src["profile"], region_name=src["region"]).client("s3")
+    src_s3.delete_bucket_policy(Bucket=src_bucket)
+    print(f"  ✅ Bucket policy removed")
 
-    print(f"\n[2/2] ✅ Sync complete: {copied} copied, {skipped} skipped, {errors} errors")
+
+def sync_bucket(cfg, src_bucket, tgt_bucket, prefix="", dry_run=False):
+    tgt = cfg["target"]
+    kms_key = cfg["target_kms_key_arn"]
+
+    print(f"\n[1/3] Granting cross-account access on {src_bucket}...")
+    if not dry_run:
+        grant_cross_account_read(cfg, src_bucket)
+
+    print(f"\n[2/3] Syncing s3://{src_bucket}/{prefix} → s3://{tgt_bucket}/{prefix}...")
+    src_path = f"s3://{src_bucket}/{prefix}" if prefix else f"s3://{src_bucket}"
+    tgt_path = f"s3://{tgt_bucket}/{prefix}" if prefix else f"s3://{tgt_bucket}"
+
+    cmd = [
+        "aws", "s3", "sync", src_path, tgt_path,
+        "--sse", "aws:kms", "--sse-kms-key-id", kms_key,
+        "--profile", tgt["profile"], "--region", tgt["region"],
+    ]
+    if dry_run:
+        cmd.append("--dryrun")
+
+    print(f"  Running: {' '.join(cmd)}")
+    result = subprocess.run(cmd)
+
+    if result.returncode != 0:
+        print(f"  ❌ Sync failed with exit code {result.returncode}", file=sys.stderr)
+        sys.exit(1)
+
+    print(f"\n[3/3] Revoking cross-account access...")
+    if not dry_run:
+        revoke_cross_account_read(cfg, src_bucket)
+
+    print(f"  ✅ Sync complete")
 
 
 def main():

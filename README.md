@@ -34,37 +34,27 @@ Source Account (ap-southeast-1)          Target Account (ap-southeast-7)
 
 ## Quick Start
 
-### 1. Create IAM Users & Access Keys
+### 1. Configure AWS Profiles
 
-Create an IAM user with programmatic access in each account.
+Create an IAM role (e.g., `MigrationAdmin`) with `AdministratorAccess` in both the source and target accounts. Each role's trust policy should allow your base account/user to assume it.
 
-**In the source account:**
+Then configure assume-role profiles in `~/.aws/config`:
 
-1. Go to [IAM Console → Users → Create user](https://console.aws.amazon.com/iam/home#/users)
-2. User name: `migration-admin`
-3. Attach policy: `AdministratorAccess` (for POC — scope down for production)
-4. Go to **Security credentials** → **Create access key** → choose **Command Line Interface (CLI)**
-5. Save the Access Key ID and Secret Access Key
+```ini
+# ~/.aws/config
 
-**Repeat in the target account** with the same steps.
+[profile source-account]
+role_arn = arn:aws:iam::<SOURCE_ACCOUNT_ID>:role/MigrationAdmin
+source_profile = default
+region = ap-southeast-1
 
-### 2. Configure AWS Profiles
-
-Set up named profiles using the access keys from Step 1:
-
-```bash
-# Source account (Singapore)
-aws configure --profile source-account
-# → AWS Access Key ID:     <SOURCE_ACCESS_KEY_FROM_STEP_1>
-# → AWS Secret Access Key: <SOURCE_SECRET_KEY_FROM_STEP_1>
-# → Default region:        ap-southeast-1
-
-# Target account (Thailand)
-aws configure --profile target-account
-# → AWS Access Key ID:     <TARGET_ACCESS_KEY_FROM_STEP_1>
-# → AWS Secret Access Key: <TARGET_SECRET_KEY_FROM_STEP_1>
-# → Default region:        ap-southeast-7
+[profile target-account]
+role_arn = arn:aws:iam::<TARGET_ACCOUNT_ID>:role/MigrationAdmin
+source_profile = default
+region = ap-southeast-7
 ```
+
+> `source_profile` points to a profile in `~/.aws/credentials` that has permission to call `sts:AssumeRole` on both roles. AWS CLI/SDK/Terraform handle token refresh automatically.
 
 Verify both profiles:
 
@@ -73,7 +63,7 @@ aws sts get-caller-identity --profile source-account
 aws sts get-caller-identity --profile target-account
 ```
 
-### 3. Deploy Test Infrastructure
+### 2. Deploy Test Infrastructure
 
 Terraform provisions all source and target resources (VPC, EC2, S3, RDS, KMS, IAM) and auto-generates the migration config.
 
@@ -85,7 +75,7 @@ terraform apply \
   -var="db_password=<YOUR_DB_PASSWORD>"
 ```
 
-### 4. Generate Config
+### 3. Generate Config
 
 ```bash
 # From project root
@@ -94,13 +84,13 @@ make gen-config
 
 This populates `scripts/config.yaml` with real resource IDs, bucket names, and KMS ARNs from Terraform outputs — no manual editing needed.
 
-### 5. Install Python dependencies
+### 4. Install Python dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 6. Run migrations
+### 5. Run migrations
 
 ```bash
 # Dry run first

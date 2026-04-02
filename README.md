@@ -34,21 +34,35 @@ Source Account (ap-southeast-1)          Target Account (ap-southeast-7)
 
 ## Quick Start
 
-### 1. Configure AWS Profiles
+### 1. Create IAM Users & Access Keys
 
-Set up named profiles for each account:
+Create an IAM user with programmatic access in each account.
+
+**In the source account:**
+
+1. Go to [IAM Console → Users → Create user](https://console.aws.amazon.com/iam/home#/users)
+2. User name: `migration-admin`
+3. Attach policy: `AdministratorAccess` (for POC — scope down for production)
+4. Go to **Security credentials** → **Create access key** → choose **Command Line Interface (CLI)**
+5. Save the Access Key ID and Secret Access Key
+
+**Repeat in the target account** with the same steps.
+
+### 2. Configure AWS Profiles
+
+Set up named profiles using the access keys from Step 1:
 
 ```bash
 # Source account (Singapore)
 aws configure --profile source-account
-# → AWS Access Key ID:     <SOURCE_ACCOUNT_KEY>
-# → AWS Secret Access Key: <SOURCE_ACCOUNT_SECRET>
+# → AWS Access Key ID:     <SOURCE_ACCESS_KEY_FROM_STEP_1>
+# → AWS Secret Access Key: <SOURCE_SECRET_KEY_FROM_STEP_1>
 # → Default region:        ap-southeast-1
 
 # Target account (Thailand)
 aws configure --profile target-account
-# → AWS Access Key ID:     <TARGET_ACCOUNT_KEY>
-# → AWS Secret Access Key: <TARGET_ACCOUNT_SECRET>
+# → AWS Access Key ID:     <TARGET_ACCESS_KEY_FROM_STEP_1>
+# → AWS Secret Access Key: <TARGET_SECRET_KEY_FROM_STEP_1>
 # → Default region:        ap-southeast-7
 ```
 
@@ -59,7 +73,7 @@ aws sts get-caller-identity --profile source-account
 aws sts get-caller-identity --profile target-account
 ```
 
-### 2. Deploy Test Infrastructure
+### 3. Deploy Test Infrastructure
 
 Terraform provisions all source and target resources (VPC, EC2, S3, RDS, KMS, IAM) and auto-generates the migration config.
 
@@ -71,7 +85,7 @@ terraform apply \
   -var="db_password=<YOUR_DB_PASSWORD>"
 ```
 
-### 3. Generate Config
+### 4. Generate Config
 
 ```bash
 # From project root
@@ -80,13 +94,13 @@ make gen-config
 
 This populates `scripts/config.yaml` with real resource IDs, bucket names, and KMS ARNs from Terraform outputs — no manual editing needed.
 
-### 4. Install Python dependencies
+### 5. Install Python dependencies
 
 ```bash
 pip install -r requirements.txt
 ```
 
-### 5. Run migrations
+### 6. Run migrations
 
 ```bash
 # Dry run first

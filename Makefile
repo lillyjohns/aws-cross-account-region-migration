@@ -23,6 +23,7 @@ infra:
 	aws cloudformation deploy \
 		--template-file cfn/target-stack.yaml \
 		--stack-name $(STACK_NAME)-target \
+		--capabilities CAPABILITY_NAMED_IAM \
 		--profile target-account --region $(TARGET_REGION) \
 		--parameter-overrides \
 			SourceAccountId=$(shell aws sts get-caller-identity --profile source-account --query Account --output text)

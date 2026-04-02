@@ -227,7 +227,7 @@ Resources:
     Properties:
       DBInstanceIdentifier: !Sub ${ProjectName}-source-db
       Engine: !Ref DBEngine
-      EngineVersion: !If [IsPostgres, "16.4", "8.0.39"]
+      EngineVersion: !If [IsPostgres, "16.6", "8.0.39"]
       DBInstanceClass: db.t3.micro
       AllocatedStorage: 20
       StorageType: gp3

@@ -210,11 +210,35 @@ resource "aws_s3_bucket_versioning" "source" {
   versioning_configuration { status = "Enabled" }
 }
 
+resource "aws_s3_bucket_server_side_encryption_configuration" "source" {
+  provider = aws.source
+  bucket   = aws_s3_bucket.source.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm     = "aws:kms"
+      kms_master_key_id = aws_kms_key.source.arn
+    }
+    bucket_key_enabled = true
+  }
+}
+
 resource "aws_s3_bucket" "target" {
   provider      = aws.target
   bucket_prefix = "${var.project_name}-tgt-"
   force_destroy = true
   tags          = { Name = "${var.project_name}-target-s3" }
+}
+
+resource "aws_s3_bucket_server_side_encryption_configuration" "target" {
+  provider = aws.target
+  bucket   = aws_s3_bucket.target.id
+  rule {
+    apply_server_side_encryption_by_default {
+      sse_algorithm     = "aws:kms"
+      kms_master_key_id = aws_kms_key.target.arn
+    }
+    bucket_key_enabled = true
+  }
 }
 
 resource "aws_s3_object" "samples" {

@@ -13,8 +13,9 @@ Source Account (ap-southeast-1)          Target Account (ap-southeast-7)
 │    → Create AMI              │────────→│    ← Copy AMI + re-encrypt   │
 │    → Share with target acct  │         │                              │
 │                              │         │                              │
-│  S3 Bucket                   │         │  S3 Bucket                   │
-│    → sync / CRR              │────────→│    ← Objects + SSE-KMS       │
+│  S3 Bucket (SSE-KMS CMK)     │         │  S3 Bucket (SSE-KMS CMK)    │
+│    → sync / CRR              │────────→│    ← Objects re-encrypted    │
+│                              │         │      with target KMS key     │
 │                              │         │                              │
 │  RDS Instance                │         │  RDS Instance (from snap)    │
 │    → Create snapshot         │────────→│    ← Copy snap + restore     │

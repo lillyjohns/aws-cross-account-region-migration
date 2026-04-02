@@ -140,7 +140,12 @@ Save the token printed — you'll need it for verification.
 
 ### Migrate
 
-Creates AMI → shares with target account → copies to target region (re-encrypted with target KMS key).
+Migrates EC2 via AMI copy — the standard approach for cross-account, cross-region EC2 migration:
+
+1. **Create AMI** from the source instance (snapshots all EBS volumes, no reboot)
+2. **Share AMI** with the target account (grants launch permission + snapshot access)
+3. **Copy AMI** to the target region — this transfers the data cross-region and re-encrypts all EBS snapshots with the target account's KMS key
+4. **Launch instance** from the copied AMI in the target VPC (with SSM role attached)
 
 Dry run:
 
@@ -179,7 +184,13 @@ make s3-prepare
 
 ### Migrate
 
-Syncs objects from source to target bucket with SSE-KMS re-encryption.
+Migrates S3 via `aws s3 sync` — parallel transfers with automatic cross-account access:
+
+1. **Grant cross-account read** — temporarily adds a bucket policy on the source bucket allowing the target account to read objects
+2. **Run `aws s3 sync`** — copies new/changed objects in parallel, re-encrypting each with the target KMS key (`--sse aws:kms`)
+3. **Revoke access** — removes the temporary bucket policy after sync completes
+
+Only new or modified objects are transferred (compared by key, size, and timestamp).
 
 Dry run:
 
@@ -217,7 +228,14 @@ Save the token printed — you'll need it for verification.
 
 ### Migrate
 
-Creates snapshot → shares with target account → copies to target region (re-encrypted) → restores.
+Migrates RDS via snapshot copy — the standard approach for cross-account, cross-region RDS migration:
+
+1. **Create snapshot** of the source DB instance
+2. **Share snapshot** with the target account (grants restore permission)
+3. **Copy snapshot** to the target region — re-encrypts with the target account's KMS key
+4. **Restore DB instance** from the copied snapshot in the target VPC (with target subnet group and security group)
+
+The restored instance retains all data, schema, users, and engine configuration from the source.
 
 Dry run:
 

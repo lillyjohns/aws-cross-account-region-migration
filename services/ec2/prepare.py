@@ -4,7 +4,7 @@
 import argparse, hashlib, json, sys, time, uuid, boto3
 from services.shared.utils import load_config
 
-MARKER_PATH = "/tmp/migration-marker.json"
+MARKER_PATH = "/home/ec2-user/migration-marker.json"
 
 
 def _ssm_run(ssm, instance_id, commands, label="command"):

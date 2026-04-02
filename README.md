@@ -176,7 +176,11 @@ python3 -m services.ec2.verify -c scripts/config.yaml \
 
 ### Prepare
 
-Fingerprint the source bucket (object count, sizes, ETags):
+Upload sample objects to the source bucket and fingerprint it:
+
+```bash
+make seed-s3
+```
 
 ```bash
 make s3-prepare
@@ -273,11 +277,19 @@ python3 -m services.rds.verify -c scripts/config.yaml \
 
 ## Cleanup
 
+Delete all migration artifacts (tagged `MigrationPOC=true`) and CloudFormation stacks:
+
+```bash
+make clean-all
+```
+
+This finds and deletes all resources created by the migration scripts (EC2 instances, AMIs, snapshots, RDS instances, RDS snapshots) in both accounts, then deletes the CloudFormation stacks.
+
+To delete only the CloudFormation stacks (without cleaning migration artifacts):
+
 ```bash
 make destroy
 ```
-
-Deletes both CloudFormation stacks and all resources.
 
 ## Security Notes
 

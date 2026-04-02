@@ -76,6 +76,9 @@ rds-migrate-dry:
 	python3 -m services.rds.migrate -c scripts/config.yaml --dry-run
 
 # ── Cleanup ───────────────────────────────────────────────
+clean-all:
+	python3 -m services.shared.cleanup -c scripts/config.yaml
+
 destroy:
 	@echo "Deleting source stack..."
 	aws cloudformation delete-stack \

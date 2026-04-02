@@ -2,7 +2,9 @@
 """EC2 cross-account cross-region migration via AMI share + copy + launch."""
 
 import argparse, sys, time, boto3
-from services.shared.utils import load_config, wait_for
+from services.shared.utils import load_config, wait_for, MIGRATION_TAG
+
+TAGS = [MIGRATION_TAG, {"Key": "CreatedBy", "Value": "migration-poc"}]
 
 
 def migrate_instance(cfg, instance_id, dry_run=False):
@@ -20,7 +22,11 @@ def migrate_instance(cfg, instance_id, dry_run=False):
 
     print(f"\n[1/5] Creating AMI from {instance_id}...")
     if dry_run:
-        print(f"  DRY RUN: would create AMI '{ami_name}', copy to {tgt['region']}, and launch")
+        print(f"  DRY RUN: would create AMI '{ami_name}'")
+        print(f"\n[2/5] Share AMI with account {tgt['account_id']}")
+        print(f"\n[3/5] Copy AMI to {tgt['region']} (re-encrypt with target KMS key)")
+        print(f"\n[4/5] Launch instance in {tgt['region']} (subnet: {subnet_id}, sg: {sg_id})")
+        print(f"\n[5/5] ✅ DRY RUN complete — no changes made")
         return
     # Flush disk before snapshot (NoReboot mode)
     ssm = boto3.Session(profile_name=src["profile"], region_name=src["region"]).client("ssm")
@@ -29,8 +35,10 @@ def migrate_instance(cfg, instance_id, dry_run=False):
                          Parameters={"commands": ["sync"]}, Comment="pre-snapshot-sync")
         time.sleep(5)
     except Exception:
-        pass  # Best effort — continue even if SSM fails
-    resp = src_ec2.create_image(InstanceId=instance_id, Name=ami_name, NoReboot=True)
+        pass
+    resp = src_ec2.create_image(InstanceId=instance_id, Name=ami_name, NoReboot=True,
+                                 TagSpecifications=[{"ResourceType": "image", "Tags": TAGS},
+                                                    {"ResourceType": "snapshot", "Tags": TAGS}])
     ami_id = resp["ImageId"]
     print(f"  ✅ AMI: {ami_id}")
     wait_for(lambda: src_ec2.describe_images(ImageIds=[ami_id]),
@@ -49,6 +57,7 @@ def migrate_instance(cfg, instance_id, dry_run=False):
     copy_resp = tgt_ec2.copy_image(Name=ami_name, SourceImageId=ami_id, SourceRegion=src["region"],
                                     Encrypted=True, KmsKeyId=kms_key)
     target_ami = copy_resp["ImageId"]
+    tgt_ec2.create_tags(Resources=[target_ami], Tags=TAGS)
     print(f"  ✅ Target AMI: {target_ami}")
     wait_for(lambda: tgt_ec2.describe_images(ImageIds=[target_ami]),
              lambda r: r["Images"][0]["State"] == "available", f"Target AMI {target_ami} available", interval=30)
@@ -61,8 +70,8 @@ def migrate_instance(cfg, instance_id, dry_run=False):
         ImageId=target_ami, InstanceType=inst_type, MinCount=1, MaxCount=1,
         SubnetId=subnet_id, SecurityGroupIds=[sg_id],
         IamInstanceProfile={"Arn": instance_profile},
-        TagSpecifications=[{"ResourceType": "instance",
-                            "Tags": [{"Key": "Name", "Value": f"migrated-{instance_id}"}]}],
+        TagSpecifications=[{"ResourceType": "instance", "Tags": TAGS + [{"Key": "Name", "Value": f"migrated-{instance_id}"}]},
+                           {"ResourceType": "volume", "Tags": TAGS}],
     )
     target_instance_id = run_resp["Instances"][0]["InstanceId"]
     print(f"  ✅ Instance: {target_instance_id}")

@@ -27,19 +27,21 @@ def seed_rds(session, instance_id, rds_endpoint, db_name, db_user, db_password):
     checksum = hashlib.sha256(token.encode()).hexdigest()
     test_data = json.dumps({"sample_rows": [{"name": "Alice", "value": 42}, {"name": "Bob", "value": 99}]})
 
-    sql = f"""
-CREATE TABLE IF NOT EXISTS {VALIDATION_TABLE} (
-    id SERIAL PRIMARY KEY, migration_token VARCHAR(64) NOT NULL,
-    checksum VARCHAR(128) NOT NULL, created_at TIMESTAMP DEFAULT NOW(), test_data JSONB
-);
-INSERT INTO {VALIDATION_TABLE} (migration_token, checksum, test_data)
-VALUES ('{token}', '{checksum}', '{test_data}');
-SELECT migration_token, checksum FROM {VALIDATION_TABLE} WHERE migration_token = '{token}';
-"""
+    sql = (
+        f"CREATE TABLE IF NOT EXISTS {VALIDATION_TABLE} "
+        f"(id SERIAL PRIMARY KEY, migration_token VARCHAR(64) NOT NULL, "
+        f"checksum VARCHAR(128) NOT NULL, created_at TIMESTAMP DEFAULT NOW(), test_data JSONB);\n"
+        f"INSERT INTO {VALIDATION_TABLE} (migration_token, checksum, test_data) "
+        f"VALUES ('{token}', '{checksum}', '{test_data}');\n"
+        f"SELECT migration_token, checksum FROM {VALIDATION_TABLE} WHERE migration_token = '{token}';"
+    )
 
     print(f"\n🌱 Seeding RDS via SSM on {instance_id}...")
+    # Write SQL to temp file to avoid shell quoting issues
     result = _ssm_run(ssm, instance_id, [
-        f'PGPASSWORD="{db_password}" psql -h {rds_endpoint} -U {db_user} -d {db_name} -c "{sql}"'
+        f"cat > /tmp/seed.sql << 'SEEDEOF'\n{sql}\nSEEDEOF",
+        f'PGPASSWORD="{db_password}" psql -h {rds_endpoint} -U {db_user} -d {db_name} -f /tmp/seed.sql',
+        "rm -f /tmp/seed.sql",
     ], label="rds-seed")
 
     if result["Status"] != "Success":

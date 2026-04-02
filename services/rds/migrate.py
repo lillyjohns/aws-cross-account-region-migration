@@ -2,7 +2,13 @@
 """RDS cross-account cross-region migration via snapshot share + copy + restore."""
 
 import argparse, sys, time, boto3
-from services.shared.utils import load_config, wait_for
+from services.shared.utils import load_config, wait_for, MIGRATION_TAG
+
+TAGS = [MIGRATION_TAG, {"Key": "CreatedBy", "Value": "migration-poc"}]
+
+
+def _tag_rds(rds, arn):
+    rds.add_tags_to_resource(ResourceName=arn, Tags=TAGS)
 
 
 def migrate_rds(cfg, db_id, target_instance_class, target_subnet_group, dry_run=False):
@@ -17,11 +23,16 @@ def migrate_rds(cfg, db_id, target_instance_class, target_subnet_group, dry_run=
     print(f"\n[1/5] Creating snapshot of {db_id}...")
     if dry_run:
         print(f"  DRY RUN: would create snapshot '{snap_id}'")
+        print(f"\n[2/5] Share snapshot with account {tgt['account_id']}")
+        print(f"\n[3/5] Copy snapshot to {tgt['region']} (re-encrypt with target KMS key)")
+        print(f"\n[4/5] Restore DB instance '{db_id}-migrated' (class: {target_instance_class})")
+        print(f"\n[5/5] ✅ DRY RUN complete — no changes made")
         return
     src_rds.create_db_snapshot(DBInstanceIdentifier=db_id, DBSnapshotIdentifier=snap_id)
     wait_for(lambda: src_rds.describe_db_snapshots(DBSnapshotIdentifier=snap_id),
              lambda r: r["DBSnapshots"][0]["Status"] == "available", f"Snapshot {snap_id} available", interval=30)
     snap_arn = src_rds.describe_db_snapshots(DBSnapshotIdentifier=snap_id)["DBSnapshots"][0]["DBSnapshotArn"]
+    _tag_rds(src_rds, snap_arn)
     print(f"  ✅ Snapshot: {snap_arn}")
 
     print(f"\n[2/5] Sharing snapshot with account {tgt['account_id']}...")
@@ -32,16 +43,19 @@ def migrate_rds(cfg, db_id, target_instance_class, target_subnet_group, dry_run=
     target_snap_id = f"copied-{snap_id}"
     print(f"\n[3/5] Copying snapshot to {tgt['region']} (re-encrypting)...")
     tgt_rds.copy_db_snapshot(SourceDBSnapshotIdentifier=snap_arn, TargetDBSnapshotIdentifier=target_snap_id,
-                              KmsKeyId=kms_key, SourceRegion=src["region"], CopyTags=True)
+                              KmsKeyId=kms_key, SourceRegion=src["region"])
     wait_for(lambda: tgt_rds.describe_db_snapshots(DBSnapshotIdentifier=target_snap_id),
              lambda r: r["DBSnapshots"][0]["Status"] == "available",
              f"Target snapshot {target_snap_id} available", interval=60)
+    tgt_snap_arn = tgt_rds.describe_db_snapshots(DBSnapshotIdentifier=target_snap_id)["DBSnapshots"][0]["DBSnapshotArn"]
+    _tag_rds(tgt_rds, tgt_snap_arn)
     print(f"  ✅ Copied: {target_snap_id}")
 
     target_db_id = f"{db_id}-migrated"
     print(f"\n[4/5] Restoring DB instance {target_db_id}...")
     restore_params = {"DBInstanceIdentifier": target_db_id, "DBSnapshotIdentifier": target_snap_id,
-                      "DBInstanceClass": target_instance_class, "MultiAZ": False, "PubliclyAccessible": False}
+                      "DBInstanceClass": target_instance_class, "MultiAZ": False, "PubliclyAccessible": False,
+                      "Tags": TAGS}
     if target_subnet_group:
         restore_params["DBSubnetGroupName"] = target_subnet_group
     if cfg.get("target_security_group_id"):

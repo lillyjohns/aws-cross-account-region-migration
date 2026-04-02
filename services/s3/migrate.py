@@ -40,8 +40,7 @@ def sync_bucket(cfg, src_bucket, tgt_bucket, prefix="", dry_run=False):
     kms_key = cfg["target_kms_key_arn"]
 
     print(f"\n[1/3] Granting cross-account access on {src_bucket}...")
-    if not dry_run:
-        grant_cross_account_read(cfg, src_bucket)
+    grant_cross_account_read(cfg, src_bucket)
 
     print(f"\n[2/3] Syncing s3://{src_bucket}/{prefix} → s3://{tgt_bucket}/{prefix}...")
     src_path = f"s3://{src_bucket}/{prefix}" if prefix else f"s3://{src_bucket}"
@@ -63,8 +62,7 @@ def sync_bucket(cfg, src_bucket, tgt_bucket, prefix="", dry_run=False):
         sys.exit(1)
 
     print(f"\n[3/3] Revoking cross-account access...")
-    if not dry_run:
-        revoke_cross_account_read(cfg, src_bucket)
+    revoke_cross_account_read(cfg, src_bucket)
 
     print(f"  ✅ Sync complete")
 

@@ -2,6 +2,8 @@
 
 import time, yaml
 
+MIGRATION_TAG = {"Key": "MigrationPOC", "Value": "true"}
+
 
 def load_config(path):
     with open(path) as f:

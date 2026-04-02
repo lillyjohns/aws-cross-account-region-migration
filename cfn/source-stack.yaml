@@ -40,6 +40,7 @@ Resources:
     Properties:
       VpcId: !Ref VPC
       CidrBlock: 10.0.0.0/24
+      MapPublicIpOnLaunch: true
       AvailabilityZone: !Select [0, !GetAZs ""]
       Tags:
         - Key: Name

@@ -26,13 +26,38 @@ Source Account (ap-southeast-1)          Target Account (ap-southeast-7)
 └──────────────────────────────┘         └──────────────────────────────┘
 ```
 
+## Project Structure
+
+```
+services/
+├── ec2/
+│   ├── prepare.py       # Seed marker via SSM + fingerprint
+│   ├── migrate.py       # AMI create → share → copy (re-encrypt)
+│   └── verify.py        # Check marker on target instance
+├── s3/
+│   ├── prepare.py       # Fingerprint source bucket
+│   ├── migrate.py       # Sync objects with SSE-KMS
+│   └── verify.py        # Compare source vs target objects
+├── rds/
+│   ├── prepare.py       # Seed validation row + fingerprint
+│   ├── migrate.py       # Snapshot → share → copy → restore
+│   └── verify.py        # Check validation row on target
+└── shared/
+    └── utils.py         # Config loader, wait_for, helpers
+cfn/
+├── source-stack.yaml    # VPC, EC2, S3, RDS, KMS, IAM
+└── target-stack.yaml    # S3, KMS
+scripts/
+└── gen-config.sh        # Generate config.yaml from CloudFormation outputs
+```
+
 ## Prerequisites
 
 - Python >= 3.9
 - AWS CLI v2
 - Two AWS accounts (source and target)
 
-## Quick Start
+## Setup
 
 ### 1. Configure AWS Profiles
 
@@ -63,13 +88,11 @@ aws sts get-caller-identity --profile target-account
 
 ### 2. Deploy Test Infrastructure
 
-CloudFormation deploys two stacks — one per account/region:
-
 ```bash
 make infra TARGET_ACCOUNT_ID=<YOUR_TARGET_ACCOUNT_ID> DB_PASSWORD=<CHOOSE_A_PASSWORD>
 ```
 
-`DB_PASSWORD` is the master password for the new test RDS instance — pick any value you like. You'll need it later for the `seed-rds` step.
+`DB_PASSWORD` is the master password for the new test RDS instance — pick any value you like. You'll need it later for the RDS seed step.
 
 This creates:
 - **Source stack** (ap-southeast-1): VPC, EC2, S3 (SSE-KMS), RDS, KMS, IAM
@@ -83,159 +106,120 @@ This creates:
 make gen-config
 ```
 
-This populates `scripts/config.yaml` with real resource IDs, bucket names, and KMS ARNs from CloudFormation stack outputs — no manual editing needed.
+Populates `scripts/config.yaml` from CloudFormation stack outputs — no manual editing needed.
 
-### 4. Install Python dependencies
+### 4. Install Python Dependencies
 
 ```bash
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-### 5. Run migrations
+---
+
+## EC2 Migration
+
+### Prepare
+
+Seed a marker file on the source instance via SSM and capture a fingerprint:
 
 ```bash
-# Dry run first
-make dry-run-all
-
-# EC2: AMI share + copy + launch instructions
-python3 scripts/migrate_ec2.py -c scripts/config.yaml
-
-# S3: One-time sync (or --mode replication for CRR setup)
-python3 scripts/migrate_s3.py -c scripts/config.yaml
-
-# RDS: Snapshot share + copy + restore
-python3 scripts/migrate_rds.py -c scripts/config.yaml
+make ec2-prepare
+# or with a specific instance:
+python3 -m services.ec2.prepare -c scripts/config.yaml -i <INSTANCE_ID>
 ```
 
-## CLI Reference
+Save the token printed — you'll need it for verification.
 
-### migrate_ec2.py
+> Requires: SSM Agent running, instance IAM role with `ssm:SendCommand`
 
-```
-usage: migrate_ec2.py [-c CONFIG] [-i INSTANCE_ID] [--dry-run]
+### Migrate
 
-  -c, --config        Config file path (default: config.yaml)
-  -i, --instance-id   Single instance ID to migrate
-  --dry-run           Show what would be done without executing
-```
-
-### migrate_s3.py
-
-```
-usage: migrate_s3.py [-c CONFIG] [-s SOURCE] [-t TARGET] [-p PREFIX] [--mode {sync,replication}] [--dry-run]
-
-  -c, --config         Config file path (default: config.yaml)
-  -s, --source-bucket  Source bucket name
-  -t, --target-bucket  Target bucket name
-  -p, --prefix         S3 key prefix filter
-  --mode               sync (one-time copy) or replication (setup CRR)
-  --dry-run            Show what would be done without executing
-```
-
-### migrate_rds.py
-
-```
-usage: migrate_rds.py [-c CONFIG] [-d DB_INSTANCE_ID] [--instance-class CLASS] [--subnet-group NAME] [--dry-run]
-
-  -c, --config          Config file path (default: config.yaml)
-  -d, --db-instance-id  Single DB instance ID to migrate
-  --instance-class      Target instance class (default: db.r6g.large)
-  --subnet-group        Target DB subnet group name
-  --dry-run             Show what would be done without executing
-```
-
-## What Each Tool Does
-
-| Tool | Steps | Duration |
-|------|-------|----------|
-| `migrate_ec2.py` | Create AMI → Share → Copy cross-region (re-encrypt) → Print launch command | 10-30 min |
-| `migrate_s3.py` | Sync objects with SSE-KMS re-encryption | Depends on data size |
-| `migrate_rds.py` | Create snapshot → Share → Copy cross-region (re-encrypt) → Restore | 30-90 min |
-
-## Validation (Pre/Post Check)
-
-Two levels of validation:
-
-### Level 1: Infrastructure Fingerprint (`validate.py`)
-
-Compares metadata (storage size, object count, engine version) — proves the container migrated correctly.
-
-### Level 2: Data Integrity Proof (`seed.py`)
-
-Plants actual test data on source, verifies it survives migration on target — proves the content migrated correctly.
-
-```
-SOURCE                                          TARGET
-┌──────────────────────────────┐                ┌──────────────────────────────┐
-│ EC2: seed marker file        │   migrate →    │ EC2: verify marker file      │
-│   /tmp/migration-marker.json │   (AMI copy)   │   /tmp/migration-marker.json │
-│   token: abc-123             │                │   token: abc-123 ✅          │
-│                              │                │                              │
-│ RDS: insert validation row   │   migrate →    │ RDS: query validation row    │
-│   _migration_validation      │   (snapshot)   │   _migration_validation      │
-│   token: def-456             │                │   token: def-456 ✅          │
-│                              │                │                              │
-│ S3: objects with ETags       │   migrate →    │ S3: compare ETags            │
-│   15432 objects, 8.5 GB      │   (sync)       │   15432 objects, 8.5 GB ✅   │
-└──────────────────────────────┘                └──────────────────────────────┘
-```
-
-### Full Workflow
+Creates AMI → shares with target account → copies to target region (re-encrypted with target KMS key).
 
 ```bash
-# ── BEFORE MIGRATION ──────────────────────────────────────
+make ec2-migrate-dry    # dry run
+make ec2-migrate        # run (⏱ 10–30 min)
+```
 
-# 1a. Seed EC2: create marker file via SSM
-python3 scripts/seed.py seed-ec2 -c scripts/config.yaml -i i-0abc123
-#  → Token: 550e8400-e29b-41d4-a716-446655440000
+Outputs a target AMI ID and a `run-instances` command to launch in the target region.
 
-# 1b. Seed RDS: insert validation record
-python3 scripts/seed.py seed-rds \
+### Verify
+
+Check the marker file on the target instance:
+
+```bash
+python3 -m services.ec2.verify -c scripts/config.yaml \
+  -i <TARGET_INSTANCE_ID> --token <TOKEN_FROM_PREPARE>
+```
+
+---
+
+## S3 Migration
+
+### Prepare
+
+Fingerprint the source bucket (object count, sizes, ETags):
+
+```bash
+make s3-prepare
+```
+
+### Migrate
+
+Syncs objects from source to target bucket with SSE-KMS re-encryption.
+
+```bash
+make s3-migrate-dry     # dry run
+make s3-migrate         # run (⏱ depends on data size)
+```
+
+### Verify
+
+Compare source and target bucket contents:
+
+```bash
+make s3-verify
+```
+
+---
+
+## RDS Migration
+
+### Prepare
+
+Seed a validation row in the source database and capture a fingerprint:
+
+```bash
+python3 -m services.rds.prepare -c scripts/config.yaml \
   --db-url "postgres://dbadmin:<PASSWORD>@<RDS_ENDPOINT>/migrationtest"
-#  → Token: 6ba7b810-9dad-11d1-80b4-00c04fd430c8
-
-# 1c. Fingerprint all source resources
-python3 scripts/validate.py pre -c scripts/config.yaml
-
-# ── MIGRATE ───────────────────────────────────────────────
-
-python3 scripts/migrate_ec2.py -c scripts/config.yaml
-python3 scripts/migrate_s3.py -c scripts/config.yaml
-python3 scripts/migrate_rds.py -c scripts/config.yaml
-
-# ── AFTER MIGRATION ───────────────────────────────────────
-
-# 3a. Verify EC2: check marker file on target instance
-python3 scripts/seed.py verify-ec2 -c scripts/config.yaml --target \
-  -i i-0xyz789 --token 550e8400-e29b-41d4-a716-446655440000
-
-# 3b. Verify RDS: check validation record on target DB
-python3 scripts/seed.py verify-rds \
-  --db-url "postgres://dbadmin:<PASSWORD>@<TARGET_RDS_ENDPOINT>/migrationtest" \
-  --token 6ba7b810-9dad-11d1-80b4-00c04fd430c8
-
-# 3c. Fingerprint target resources + compare
-python3 scripts/validate.py post -c scripts/config.yaml \
-  -r ec2:i-0xyz789 s3:my-target-bucket rds:mydb-migrated
-
-python3 scripts/validate.py compare \
-  -m "ec2:i-0abc123=ec2:i-0xyz789" \
-     "s3:my-source-bucket=s3:my-target-bucket" \
-     "rds:mydb-prod=rds:mydb-migrated"
 ```
 
-### What Gets Checked
+Save the token printed — you'll need it for verification.
 
-| Service | Seed (before)                              | Verify (after)                             |
-|---------|--------------------------------------------|--------------------------------------------|
-| EC2     | Marker file via SSM with UUID + SHA256     | Read file via SSM, compare token+checksum  |
-| S3      | _(uses existing objects — ETag comparison)_| Compare object count, size, sample ETags   |
-| RDS     | Insert row with UUID + SHA256 + JSON data  | Query row, compare token+checksum+data     |
+> Requires: Network access to RDS, DB credentials
 
-### Prerequisites for seed.py
+### Migrate
 
-- EC2: SSM Agent running, instance IAM role with `ssm:SendCommand`
-- RDS: Network access from your machine (or bastion), DB credentials
+Creates snapshot → shares with target account → copies to target region (re-encrypted) → restores.
+
+```bash
+make rds-migrate-dry    # dry run
+make rds-migrate        # run (⏱ 30–90 min)
+```
+
+### Verify
+
+Check the validation row on the target database:
+
+```bash
+python3 -m services.rds.verify \
+  --db-url "postgres://dbadmin:<PASSWORD>@<TARGET_RDS_ENDPOINT>/migrationtest" \
+  --token <TOKEN_FROM_PREPARE>
+```
+
+---
 
 ## Post-Migration Checklist
 
@@ -247,12 +231,20 @@ python3 scripts/validate.py compare \
 - [ ] Test application functionality
 - [ ] Clean up source snapshots / AMIs after validation
 
+## Cleanup
+
+```bash
+make destroy
+```
+
+Deletes both CloudFormation stacks and all resources.
+
 ## Security Notes
 
 - All cross-region copies are re-encrypted with the target account's KMS key
 - Source KMS key grants only `Decrypt` + `ReEncryptFrom` to target account
 - IAM roles follow least-privilege for each service
-- `--dry-run` flag available on all tools — use it first
+- `--dry-run` flag available on all migration tools — use it first
 
 ## License
 

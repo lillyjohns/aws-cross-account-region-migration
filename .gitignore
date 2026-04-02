@@ -7,3 +7,4 @@ validation/
 *.env
 .DS_Store
 scripts/config.yaml
+.venv/

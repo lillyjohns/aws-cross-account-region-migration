@@ -1,4 +1,4 @@
-.PHONY: setup infra gen-config pre-check migrate-ec2 migrate-s3 migrate-rds dry-run-all destroy
+.PHONY: setup infra gen-config destroy
 
 STACK_NAME    = cross-account-migration
 SOURCE_REGION = ap-southeast-1
@@ -30,32 +30,35 @@ infra:
 gen-config:
 	bash scripts/gen-config.sh
 
-# ── Seed test data ────────────────────────────────────────
-seed-ec2:
-	python3 scripts/seed.py seed-ec2 -c scripts/config.yaml
+# ── EC2 ───────────────────────────────────────────────────
+ec2-prepare:
+	python3 -m services.ec2.prepare -c scripts/config.yaml
 
-seed-rds:
-	@echo "Run manually with your DB password:"
-	@echo "  python3 scripts/seed.py seed-rds --db-url \"postgres://admin:<PASS>@<RDS_ENDPOINT>/migrationtest\""
+ec2-migrate:
+	python3 -m services.ec2.migrate -c scripts/config.yaml
 
-# ── Validate ──────────────────────────────────────────────
-pre-check:
-	python3 scripts/validate.py pre -c scripts/config.yaml
+ec2-migrate-dry:
+	python3 -m services.ec2.migrate -c scripts/config.yaml --dry-run
 
-# ── Migrate ───────────────────────────────────────────────
-migrate-ec2:
-	python3 scripts/migrate_ec2.py -c scripts/config.yaml
+# ── S3 ────────────────────────────────────────────────────
+s3-prepare:
+	python3 -m services.s3.prepare -c scripts/config.yaml
 
-migrate-s3:
-	python3 scripts/migrate_s3.py -c scripts/config.yaml
+s3-migrate:
+	python3 -m services.s3.migrate -c scripts/config.yaml
 
-migrate-rds:
-	python3 scripts/migrate_rds.py -c scripts/config.yaml
+s3-migrate-dry:
+	python3 -m services.s3.migrate -c scripts/config.yaml --dry-run
 
-dry-run-all:
-	python3 scripts/migrate_ec2.py -c scripts/config.yaml --dry-run
-	python3 scripts/migrate_s3.py -c scripts/config.yaml --dry-run
-	python3 scripts/migrate_rds.py -c scripts/config.yaml --dry-run
+s3-verify:
+	python3 -m services.s3.verify -c scripts/config.yaml
+
+# ── RDS ───────────────────────────────────────────────────
+rds-migrate:
+	python3 -m services.rds.migrate -c scripts/config.yaml
+
+rds-migrate-dry:
+	python3 -m services.rds.migrate -c scripts/config.yaml --dry-run
 
 # ── Cleanup ───────────────────────────────────────────────
 destroy:

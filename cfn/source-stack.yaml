@@ -190,6 +190,7 @@ Resources:
       UserData:
         Fn::Base64: !Sub |
           #!/bin/bash
+          dnf install -y postgresql16
           echo "Migration test instance - $(date)" > /home/ec2-user/README.txt
           echo '{"created":"source","region":"${AWS::Region}"}' > /home/ec2-user/instance-info.json
       Tags:

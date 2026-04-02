@@ -189,16 +189,13 @@ make s3-verify
 
 ### Prepare
 
-Seed a validation row in the source database and capture a fingerprint:
+Seed a validation row in the source database (runs `psql` on the EC2 instance via SSM — no direct DB access needed):
 
 ```bash
-python3 -m services.rds.prepare -c scripts/config.yaml \
-  --db-url "postgres://dbadmin:<PASSWORD>@<RDS_ENDPOINT>/migrationtest"
+make rds-prepare DB_PASSWORD=<YOUR_DB_PASSWORD>
 ```
 
 Save the token printed — you'll need it for verification.
-
-> Requires: Network access to RDS, DB credentials
 
 ### Migrate
 
@@ -211,12 +208,12 @@ make rds-migrate        # run (⏱ 30–90 min)
 
 ### Verify
 
-Check the validation row on the target database:
+Check the validation row on the target database (also via SSM):
 
 ```bash
-python3 -m services.rds.verify \
-  --db-url "postgres://dbadmin:<PASSWORD>@<TARGET_RDS_ENDPOINT>/migrationtest" \
-  --token <TOKEN_FROM_PREPARE>
+python3 -m services.rds.verify -c scripts/config.yaml \
+  --db-password <YOUR_DB_PASSWORD> --token <TOKEN_FROM_PREPARE> \
+  --target-instance-id <TARGET_EC2_ID> --target-rds-endpoint <TARGET_RDS_ENDPOINT>
 ```
 
 ---

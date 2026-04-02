@@ -54,6 +54,9 @@ s3-verify:
 	python3 -m services.s3.verify -c scripts/config.yaml
 
 # ── RDS ───────────────────────────────────────────────────
+rds-prepare:
+	python3 -m services.rds.prepare -c scripts/config.yaml --db-password $(DB_PASSWORD)
+
 rds-migrate:
 	python3 -m services.rds.migrate -c scripts/config.yaml
 
